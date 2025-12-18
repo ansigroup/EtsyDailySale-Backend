@@ -55,6 +55,16 @@ console.log('consuming license', req.body);
     }
 
     if (requestedRuns > 0) {
+        if (license.plan === 'trial' && requestedRuns > 3) {
+            return res.status(403).json({
+                valid: false,
+                plan: license.plan,
+                remainingRuns: Math.max(0, remainingRuns),
+                message: `Trial plan allows maximum run a sales for only 3 days at a time. Please upgrade your plan.`,
+            });
+
+        }
+
       // enforce limit for non-unlimited plans
       if (
         license.maxRunsPerMonth >= 0 &&
