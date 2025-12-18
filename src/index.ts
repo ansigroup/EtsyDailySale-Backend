@@ -1,0 +1,52 @@
+// src/index.ts
+import express from "express";
+import cors, { CorsOptions } from "cors";
+import mongoose from "mongoose";
+import { MONGODB_URI, PORT } from "./config";
+import licenseRoutes from "./routes/licenseRoutes";
+import adminRoutes from "./routes/adminRoutes";
+import userRoutes from "./routes/userRoutes";
+import paddlePaymentHandler from "./routes/paddlePaymentRoute";
+
+
+
+async function start() {
+  await mongoose.connect(MONGODB_URI);
+  console.log("MongoDB connected");
+
+  const app = express();
+
+  const corsOptions: CorsOptions = {
+    // Allow any origin (including browser extensions and file://) during development.
+    // If you need to restrict this in production, replace the callback with
+    // a whitelist check instead of the permissive "true" below.
+    origin: (_origin, callback) => callback(null, true),
+    methods: ["GET", "POST", "PATCH", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "x-admin-secret", "x-user-email"],
+    credentials: true,
+  };
+
+  app.use(cors(corsOptions));
+  app.options("*", cors(corsOptions));
+  app.use(express.json());
+
+  app.get("/", (_req, res) => {
+    res.json({ status: "ok", service: "Etsy Sale Manager License API" });
+  });
+
+  app.post("/paddlepayment", paddlePaymentHandler);
+
+  app.use("/api/license", licenseRoutes);
+  app.use("/api/admin", adminRoutes);
+  app.use("/api", userRoutes);
+
+  app.listen(PORT, () => {
+    console.log(`License server running on http://localhost:${PORT}`);
+  });
+}
+
+start().catch((err) => {
+  console.error("Fatal error:", err);
+  process.exit(1);
+});
+

@@ -1,1 +1,1 @@
-# EtsyDailySale-Backend
+# DailySAle.app-Server
