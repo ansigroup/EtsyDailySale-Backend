@@ -20,12 +20,12 @@ async function start() {
     // Allow any origin (including browser extensions and file://) during development.
     // If you need to restrict this in production, replace the callback with
     // a whitelist check instead of the permissive "true" below.
-    origin: (_origin, callback) => callback(null, true),
-    methods: ["GET", "POST", "PATCH", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "x-admin-secret", "x-user-email"],
-    credentials: true,
-  };
 
+    origin: ["https://dailysale.app"],   // add http://localhost:5173
+    credentials: true,
+    methods: ["GET","POST","PUT","DELETE","OPTIONS"],
+    allowedHeaders: ["Content-Type","Authorization"],
+  };
   app.use(cors(corsOptions));
   app.options("*", cors(corsOptions));
   app.use(express.json());
