@@ -21,13 +21,14 @@ async function start() {
     // If you need to restrict this in production, replace the callback with
     // a whitelist check instead of the permissive "true" below.
 
-    origin: ["https://dailysale.app"],   // add http://localhost:5173
+    origin: ["*", "http://localhost:5173"],   // add http://localhost:5173
     credentials: true,
     methods: ["GET","POST","PUT","DELETE","OPTIONS"],
-    allowedHeaders: ["Content-Type","Authorization"],
+    allowedHeaders: ["Content-Type","Authorization", "x-user-email"],
   };
   app.use(cors(corsOptions));
-  app.options("*", cors(corsOptions));
+  //app.options("*", cors(corsOptions));
+  //app.options("*", cors());
   app.use(express.json());
 
   app.get("/", (_req, res) => {
