@@ -21,7 +21,7 @@ async function start() {
     // If you need to restrict this in production, replace the callback with
     // a whitelist check instead of the permissive "true" below.
 
-    origin: ["*", "http://localhost:5173", "https://www.etsy.com", "https://etsy.com"],
+    origin: ["*", "http://localhost:5173", "https://www.etsy.com", "https://etsy.com", "https://dailysale.app/"],
     credentials: true,
     methods: ["GET","POST","PUT","DELETE","OPTIONS"],
     allowedHeaders: ["Content-Type","Authorization", "x-user-email"],
