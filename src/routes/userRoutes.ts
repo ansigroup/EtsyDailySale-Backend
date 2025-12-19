@@ -28,15 +28,26 @@ function getEmailFromRequest(req: any) {
   return undefined;
 }
 
-async function ensureUser(email: string): Promise<IUser> {
+async function ensureUser(email: string, ref?: string): Promise<IUser> {
   let user = await User.findOne({ email }).exec();
   if (!user) {
+    let referrerEmail: string | undefined;
+    if (ref) {
+      const referrer = await User.findOne({ referralCode: ref }).exec();
+      if (referrer) {
+        referrerEmail = referrer.email;
+        referrer.referredUsersCount = (referrer.referredUsersCount || 0) + 1;
+        await referrer.save();
+      }
+    }
+
     const license = await provisionLicenseForPlan("free");
     user = await User.create({
       email,
       plan: "free",
       subscriptionStatus: "none",
       licenseKey: license.key,
+      referrer: referrerEmail,
     });
   } else if (!user.licenseKey) {
     const license = await provisionLicenseForPlan(user.plan);
@@ -54,13 +65,14 @@ function referralLinkForUser(user: IUser) {
 
 router.post("/auth/request-magic-link", async (req, res) => {
   try {
-    const { email } = req.body || {};
+    const { email, ref } = req.body || {};
     if (!email || typeof email !== "string") {
       return res.status(400).json({ ok: false, message: "Email is required" });
     }
 
     const normalizedEmail = email.toLowerCase();
-    const user = await ensureUser(normalizedEmail);
+    const referralCode = typeof ref === "string" && ref.trim().length > 0 ? ref : undefined;
+    const user = await ensureUser(normalizedEmail, referralCode);
 
     const loginCode = generateMagicLoginCode();
     user.magicLoginCode = loginCode;

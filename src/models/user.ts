@@ -10,6 +10,7 @@ export interface IUser extends Document {
   subscriptionStatus: SubscriptionStatus;
   nextBillingDate?: Date | null;
   referralCode?: string;
+  referrer?: string;
   referredUsersCount: number;
   activePaidReferrals: number;
   monthlyReferralEarnings: number;
@@ -32,6 +33,7 @@ const UserSchema = new Schema<IUser>(
     },
     nextBillingDate: { type: Date },
     referralCode: { type: String },
+    referrer: { type: String },
     referredUsersCount: { type: Number, default: 0 },
     activePaidReferrals: { type: Number, default: 0 },
     monthlyReferralEarnings: { type: Number, default: 0 },
