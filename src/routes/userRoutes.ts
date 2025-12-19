@@ -271,7 +271,7 @@ router.get("/referral", async (req, res) => {
       await user.save();
     }
     return res.json({
-      referralLink: referralLinkForUser(user),
+      link: referralLinkForUser(user),
       referredUsersCount: user.referredUsersCount,
       activePaidReferrals: user.activePaidReferrals,
       monthlyReferralEarnings: user.monthlyReferralEarnings,
@@ -292,7 +292,7 @@ router.post("/referral/generate-link", async (req, res) => {
     user.referralCode = generateLicenseKey("REF");
     await user.save();
 
-    return res.json({ referralLink: referralLinkForUser(user) });
+    return res.json({ link: referralLinkForUser(user) });
   } catch (error) {
     console.error("/referral/generate-link error", error);
     return res.status(500).json({ message: "Server error" });
