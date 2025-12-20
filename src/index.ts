@@ -7,6 +7,7 @@ import licenseRoutes from "./routes/licenseRoutes";
 import adminRoutes from "./routes/adminRoutes";
 import userRoutes from "./routes/userRoutes";
 import paddlePaymentHandler from "./routes/paddlePaymentRoute";
+import { initializeTelegramBot } from "./utils/telegramBot";
 
 
 
@@ -40,6 +41,8 @@ async function start() {
   app.use("/api/license", licenseRoutes);
   app.use("/api/admin", adminRoutes);
   app.use("/api", userRoutes);
+
+  initializeTelegramBot();
 
   app.listen(PORT, () => {
     console.log(`License server running on http://localhost:${PORT}`);

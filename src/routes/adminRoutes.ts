@@ -2,7 +2,9 @@
 import { Router } from "express";
 import { License, firstDayOfCurrentMonth } from "../models/license";
 import { ADMIN_SECRET } from "../config";
+import { SupportRequest } from "../models/support";
 import { generateLicenseKey } from "../utils/licenseUtils";
+import { sendSupportReplyEmail } from "../utils/supportEmail";
 
 
 const router = Router();
@@ -82,6 +84,41 @@ router.patch("/license/:key", async (req, res) => {
   } catch (e) {
     console.error("Update license error:", e);
     res.status(500).json({ message: "Server error" });
+  }
+});
+
+/**
+ * POST /api/admin/support/:id/reply
+ * Body: { message, subject? }
+ */
+router.post("/support/:id/reply", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { message, subject } = req.body || {};
+
+    if (!message || typeof message !== "string") {
+      return res.status(400).json({ message: "Reply message is required" });
+    }
+
+    const supportRequest = await SupportRequest.findById(id).exec();
+    if (!supportRequest) {
+      return res.status(404).json({ message: "Support ticket not found" });
+    }
+
+    const emailSubject = typeof subject === "string" && subject.trim().length > 0
+      ? subject
+      : `Re: ${supportRequest.subject}`;
+
+    const { sent } = await sendSupportReplyEmail(
+      supportRequest.email,
+      emailSubject,
+      message
+    );
+
+    return res.json({ ok: true, emailSent: sent });
+  } catch (e) {
+    console.error("Send support reply error:", e);
+    return res.status(500).json({ message: "Server error" });
   }
 });
 

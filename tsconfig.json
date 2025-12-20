@@ -6,7 +6,12 @@
     "rootDir": "src",
     "strict": true,
     "esModuleInterop": true,
-    "skipLibCheck": true
-  }
+    "skipLibCheck": true,
+    "baseUrl": "./",
+    "paths": {
+      "node-telegram-bot-api": ["src/types/node-telegram-bot-api"]
+    }
+  },
+  "include": ["src/**/*"]
 }
 

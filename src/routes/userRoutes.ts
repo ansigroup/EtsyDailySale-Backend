@@ -1,10 +1,11 @@
 import { Router } from "express";
 import { APP_BASE_URL } from "../config";
 import { License } from "../models/license";
-import { SupportRequest } from "../models/support";
+import { ISupportRequest, SupportRequest } from "../models/support";
 import { IUser, User } from "../models/user";
 import { generateLicenseKey, provisionLicenseForPlan } from "../utils/licenseUtils";
 import { sendMagicLinkEmail } from "../utils/magicLinkEmail";
+import { sendTelegramNotification } from "../utils/telegramBot";
 import {
   price2IdForEnvironment,
   priceIdForEnvironment,
@@ -28,8 +29,15 @@ function getEmailFromRequest(req: any) {
   return undefined;
 }
 
-async function ensureUser(email: string, ref?: string): Promise<IUser> {
+interface EnsureUserResult {
+  user: IUser;
+  created: boolean;
+  referrerEmail?: string;
+}
+
+async function ensureUser(email: string, ref?: string): Promise<EnsureUserResult> {
   let user = await User.findOne({ email }).exec();
+  let created = false;
   if (!user) {
     let referrerEmail: string | undefined;
     if (ref) {
@@ -49,12 +57,42 @@ async function ensureUser(email: string, ref?: string): Promise<IUser> {
       licenseKey: license.key,
       referrer: referrerEmail,
     });
+    created = true;
+    return { user, created, referrerEmail };
   } else if (!user.licenseKey) {
     const license = await provisionLicenseForPlan(user.plan);
     user.licenseKey = license.key;
     await user.save();
   }
-  return user;
+  return { user, created, referrerEmail: user.referrer };
+}
+
+async function notifyNewUser(user: IUser, referrerEmail?: string) {
+  const referralLink = referralLinkForUser(user) || "N/A";
+  const referrerText = referrerEmail ? `Referrer: ${referrerEmail}` : "Referrer: none";
+  const message = [
+    "🆕 New user registration",
+    `Email: ${user.email}`,
+    referrerText,
+    `Referral link: ${referralLink}`,
+  ].join("\n");
+
+  await sendTelegramNotification(message);
+}
+
+async function notifySupportRequest(record: ISupportRequest) {
+  const message = [
+    "🆘 New support request",
+    `Ticket ID: ${record.id}`,
+    `Email: ${record.email}`,
+    `Subject: ${record.subject}`,
+    `Attach logs: ${record.attachLogs ? "yes" : "no"}`,
+    "",
+    "Message:",
+    record.message,
+  ].join("\n");
+
+  await sendTelegramNotification(message);
 }
 
 function referralLinkForUser(user: IUser) {
@@ -72,12 +110,16 @@ router.post("/auth/request-magic-link", async (req, res) => {
 
     const normalizedEmail = email.toLowerCase();
     const referralCode = typeof ref === "string" && ref.trim().length > 0 ? ref : undefined;
-    const user = await ensureUser(normalizedEmail, referralCode);
+    const { user, created, referrerEmail } = await ensureUser(normalizedEmail, referralCode);
 
     const loginCode = generateMagicLoginCode();
     user.magicLoginCode = loginCode;
     user.magicLoginExpiresAt = new Date(Date.now() + 1000 * 60 * 15);
     await user.save();
+
+    if (created) {
+      await notifyNewUser(user, referrerEmail);
+    }
 
     const { sent, loginUrl } = await sendMagicLinkEmail(normalizedEmail, loginCode);
 
@@ -134,7 +176,7 @@ router.get("/me", async (req, res) => {
     if (!email) {
       return res.status(401).json({ message: "Missing user identity" });
     }
-    const user = await ensureUser(email);
+    const { user } = await ensureUser(email);
     return res.json({
       email: user.email,
       plan: user.plan,
@@ -163,7 +205,7 @@ router.post("/subscription/create", async (req, res) => {
       return res.status(500).json({ ok: false, message: "Paddle price ID is not configured" });
     }
 
-    const user = await ensureUser(email);
+    const { user } = await ensureUser(email);
 
     user.plan = "full";
     user.subscriptionStatus = "active";
@@ -208,7 +250,7 @@ router.post("/subscription/cancel", async (req, res) => {
     if (!email) {
       return res.status(401).json({ message: "Missing user identity" });
     }
-    const user = await ensureUser(email);
+    const { user } = await ensureUser(email);
     user.plan = "free";
     user.subscriptionStatus = "canceled";
     user.nextBillingDate = undefined;
@@ -235,7 +277,7 @@ router.get("/license", async (req, res) => {
     if (!email) {
       return res.status(401).json({ message: "Missing user identity" });
     }
-    const user = await ensureUser(email);
+    const { user } = await ensureUser(email);
     const license = await License.findOne({ key: user.licenseKey }).exec();
     if (!license) {
       return res.status(404).json({ message: "License not found" });
@@ -254,7 +296,7 @@ router.post("/license/regenerate", async (req, res) => {
       return res.status(401).json({ message: "Missing user identity" });
     }
 
-    const user = await ensureUser(email);
+    const { user } = await ensureUser(email);
 
     if (user.licenseKey) {
       await License.updateOne({ key: user.licenseKey }, { active: false }).exec();
@@ -277,7 +319,7 @@ router.get("/referral", async (req, res) => {
     if (!email) {
       return res.status(401).json({ message: "Missing user identity" });
     }
-    const user = await ensureUser(email);
+    const { user } = await ensureUser(email);
     if (!user.referralCode) {
       user.referralCode = generateLicenseKey("REF");
       await user.save();
@@ -300,7 +342,7 @@ router.post("/referral/generate-link", async (req, res) => {
     if (!email) {
       return res.status(401).json({ message: "Missing user identity" });
     }
-    const user = await ensureUser(email);
+    const { user } = await ensureUser(email);
     user.referralCode = generateLicenseKey("REF");
     await user.save();
 
@@ -324,6 +366,7 @@ router.post("/support", async (req, res) => {
     }
 
     const record = await SupportRequest.create({ email, subject, message, attachLogs });
+    await notifySupportRequest(record);
     return res.json({ ok: true, ticketId: record.id });
   } catch (error) {
     console.error("/support error", error);
