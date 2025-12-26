@@ -30,6 +30,16 @@ export const PADDLE_PRICE2_ID = process.env.PADDLE_PRICE2_ID || "";
 export const PADDLE_SANDBOX_PRICE2_ID = process.env.PADDLE_SANDBOX_PRICE2_ID || PADDLE_PRICE2_ID;
 export const PADDLE_ENVIRONMENT: PaddleEnvironment =
   process.env.PADDLE_ENVIRONMENT === "sandbox" ? "sandbox" : "production";
+export const PADDLE_WEBHOOK_SECRET = process.env.PADDLE_WEBHOOK_SECRET || "";
+
+export const CREDITS_PER_RUN = Number(process.env.CREDITS_PER_RUN || 1);
+export const CREDITS_PACK_SMALL = Number(process.env.CREDITS_PACK_SMALL || 30);
+export const CREDITS_PACK_LARGE = Number(process.env.CREDITS_PACK_LARGE || 200);
+export const FREE_RUNS_ON_SIGNUP = Number(process.env.FREE_RUNS_ON_SIGNUP || 0);
+export const REFERRAL_SIGNUP_CREDITS = Number(process.env.REFERRAL_SIGNUP_CREDITS || 2);
+export const REFERRAL_PURCHASE_BONUS_RATE = Number(
+  process.env.REFERRAL_PURCHASE_BONUS_RATE || 0.1
+);
 
 /*
 curl -X POST http://localhost:4000/api/admin/license \

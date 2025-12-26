@@ -9,11 +9,14 @@ export interface IUser extends Document {
   licenseKey?: string;
   subscriptionStatus: SubscriptionStatus;
   nextBillingDate?: Date | null;
+  credits: number;
   referralCode?: string;
   referrer?: string;
   referredUsersCount: number;
   activePaidReferrals: number;
   monthlyReferralEarnings: number;
+  referralCreditsEarned: number;
+  paidReferralUsers: string[];
   magicLoginCode?: string;
   magicLoginExpiresAt?: Date;
 
@@ -32,11 +35,14 @@ const UserSchema = new Schema<IUser>(
       default: "none",
     },
     nextBillingDate: { type: Date },
+    credits: { type: Number, default: 0 },
     referralCode: { type: String },
     referrer: { type: String },
     referredUsersCount: { type: Number, default: 0 },
     activePaidReferrals: { type: Number, default: 0 },
     monthlyReferralEarnings: { type: Number, default: 0 },
+    referralCreditsEarned: { type: Number, default: 0 },
+    paidReferralUsers: { type: [String], default: [] },
     magicLoginCode: { type: String },
     magicLoginExpiresAt: { type: Date },
   },

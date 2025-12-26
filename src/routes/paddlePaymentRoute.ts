@@ -1,5 +1,16 @@
 import { Request, Response } from "express";
+import {
+  CREDITS_PACK_LARGE,
+  CREDITS_PACK_SMALL,
+  PADDLE_PRICE2_ID,
+  PADDLE_PRICE_ID,
+  PADDLE_SANDBOX_PRICE2_ID,
+  PADDLE_SANDBOX_PRICE_ID,
+  REFERRAL_PURCHASE_BONUS_RATE,
+} from "../config";
+import { CreditPurchaseLog } from "../models/creditPurchaseLog";
 import { License } from "../models/license";
+import { ReferralEarning } from "../models/referralEarning";
 import { User } from "../models/user";
 import { provisionLicenseForPlan } from "../utils/licenseUtils";
 
@@ -12,6 +23,14 @@ function extractEmail(payload: any): string | undefined {
     payload?.data?.customer?.email,
     payload?.data?.customer?.email_address,
     payload?.customer?.email,
+    payload?.data?.billing_details?.email,
+    payload?.data?.payments?.[0]?.billing_details?.email,
+    payload?.data?.payments?.[0]?.customer_email,
+    payload?.data?.checkout?.customer_email,
+    payload?.data?.custom_data?.email,
+    payload?.data?.custom_data?.user_email,
+    payload?.custom_data?.email,
+    payload?.custom_data?.user_email,
   ];
   const email = candidates.find((value) => typeof value === "string" && value.trim().length > 0);
   return email?.toLowerCase();
@@ -36,18 +55,6 @@ function extractStatus(payload: any): string | undefined {
   return status?.toLowerCase();
 }
 
-function extractNextBillingDate(payload: any): Date | undefined {
-  const candidates = [
-    payload?.next_bill_date,
-    payload?.next_payment_date,
-    payload?.data?.next_payment_at,
-    payload?.data?.subscription?.next_billed_at,
-    payload?.next_billed_at,
-  ];
-  const dateString = candidates.find((value) => typeof value === "string" && value.trim().length > 0);
-  return dateString ? new Date(dateString) : undefined;
-}
-
 function isPaymentSuccess(eventType: string | undefined, payload: any) {
   if (!eventType) return false;
   if (
@@ -61,57 +68,127 @@ function isPaymentSuccess(eventType: string | undefined, payload: any) {
   return eventType.includes("subscription") && status === "active";
 }
 
-function isSubscriptionCanceled(eventType: string | undefined, payload: any) {
-  if (!eventType) return false;
-  if (eventType.includes("subscription_cancelled") || eventType.includes("subscription.canceled")) {
-    return true;
+function extractPriceIds(payload: any): string[] {
+  const ids = new Set<string>();
+  const candidates: Array<string | undefined> = [
+    payload?.price_id,
+    payload?.priceId,
+    payload?.data?.price_id,
+    payload?.data?.priceId,
+  ];
+  for (const value of candidates) {
+    if (typeof value === "string" && value.trim().length > 0) {
+      ids.add(value);
+    }
   }
-  const status = extractStatus(payload);
-  return status === "canceled" || status === "cancelled";
+
+  const itemLists = [
+    payload?.data?.items,
+    payload?.items,
+    payload?.data?.line_items,
+    payload?.data?.checkout?.items,
+    payload?.order?.items,
+  ];
+
+  for (const list of itemLists) {
+    if (!Array.isArray(list)) continue;
+    for (const item of list) {
+      const itemCandidates: Array<string | undefined> = [
+        item?.price_id,
+        item?.priceId,
+        item?.price?.id,
+        item?.price?.price_id,
+      ];
+      for (const candidate of itemCandidates) {
+        if (typeof candidate === "string" && candidate.trim().length > 0) {
+          ids.add(candidate);
+        }
+      }
+    }
+  }
+
+  return Array.from(ids);
 }
 
-async function activateSubscription(email: string, payload: any) {
+function creditsForPriceId(priceId: string) {
+  if (
+    priceId === PADDLE_PRICE_ID ||
+    priceId === PADDLE_SANDBOX_PRICE_ID
+  ) {
+    return CREDITS_PACK_SMALL;
+  }
+  if (
+    priceId === PADDLE_PRICE2_ID ||
+    priceId === PADDLE_SANDBOX_PRICE2_ID
+  ) {
+    return CREDITS_PACK_LARGE;
+  }
+  return 0;
+}
+
+async function applyCreditPurchase(email: string, payload: any) {
   const user =
     (await User.findOne({ email }).exec()) ||
     (await User.create({ email, plan: "free", subscriptionStatus: "none" }));
 
-  user.plan = "full";
-  user.subscriptionStatus = "active";
-  user.nextBillingDate = extractNextBillingDate(payload) || new Date(Date.now() + 1000 * 60 * 60 * 24 * 30);
-
   let license = user.licenseKey ? await License.findOne({ key: user.licenseKey }).exec() : null;
   if (!license) {
-    license = await provisionLicenseForPlan("full");
+    license = await provisionLicenseForPlan("free");
     user.licenseKey = license.key;
-  } else {
-    license.plan = "pro";
-    license.maxRunsPerMonth = -1;
-    license.active = true;
-    await license.save();
   }
 
+  const priceIds = extractPriceIds(payload);
+  const creditsToAdd = priceIds.reduce((total, priceId) => total + creditsForPriceId(priceId), 0);
+
+  if (creditsToAdd <= 0) {
+    console.warn("Paddle payment received without a recognized price ID", {
+      email,
+      eventType: extractEventType(payload),
+      priceIds,
+    });
+    return;
+  }
+
+  user.credits = (user.credits || 0) + creditsToAdd;
   await user.save();
-}
 
-async function cancelSubscription(email: string) {
-  const user = await User.findOne({ email }).exec();
-  if (!user) return;
+  await CreditPurchaseLog.create({
+    email: user.email,
+    credits: creditsToAdd,
+    priceId: priceIds[0],
+    eventId: payload?.event_id,
+  });
 
-  user.plan = "free";
-  user.subscriptionStatus = "canceled";
-  user.nextBillingDate = undefined;
+  if (user.referrer) {
+    const referrer = await User.findOne({ email: user.referrer }).exec();
+    if (referrer) {
+      const bonusRate = Number.isFinite(REFERRAL_PURCHASE_BONUS_RATE)
+        ? REFERRAL_PURCHASE_BONUS_RATE
+        : 0.1;
+      const referralBonus = Math.round(creditsToAdd * bonusRate);
+      if (referralBonus > 0) {
+        referrer.credits = (referrer.credits || 0) + referralBonus;
+        referrer.referralCreditsEarned =
+          (referrer.referralCreditsEarned || 0) + referralBonus;
 
-  if (user.licenseKey) {
-    const license = await License.findOne({ key: user.licenseKey }).exec();
-    if (license) {
-      license.plan = "trial";
-      license.maxRunsPerMonth = 3;
-      license.active = true;
-      await license.save();
+        const referredEmail = user.email;
+        if (!referrer.paidReferralUsers?.includes(referredEmail)) {
+          referrer.paidReferralUsers = [...(referrer.paidReferralUsers || []), referredEmail];
+          referrer.activePaidReferrals = (referrer.activePaidReferrals || 0) + 1;
+        }
+
+        await ReferralEarning.create({
+          referrerEmail: referrer.email,
+          referredEmail,
+          credits: referralBonus,
+          source: "purchase",
+          purchaseCredits: creditsToAdd,
+        });
+
+        await referrer.save();
+      }
     }
   }
-
-  await user.save();
 }
 
 export async function paddlePaymentHandler(req: Request, res: Response) {
@@ -121,13 +198,17 @@ export async function paddlePaymentHandler(req: Request, res: Response) {
     const eventType = extractEventType(req.body);
 
     if (!email) {
+      console.warn("Paddle webhook missing email", {
+        eventType,
+        eventId: req.body?.event_id,
+        notificationId: req.body?.notification_id,
+        priceIds: extractPriceIds(req.body),
+      });
       return res.status(400).json({ ok: false, message: "Missing customer email" });
     }
 
     if (isPaymentSuccess(eventType, req.body)) {
-      await activateSubscription(email, req.body);
-    } else if (isSubscriptionCanceled(eventType, req.body)) {
-      await cancelSubscription(email);
+      await applyCreditPurchase(email, req.body);
     }
 
     return res.json({ ok: true });

@@ -1,0 +1,118 @@
+#esm-panel {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 999999;
+  width: 320px;
+  max-height: 80vh;
+  background: #ffffff;
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+#esm-panel-header {
+  padding: 8px 10px;
+  background: #f2f7ff;
+  border-bottom: 1px solid #dde5ff;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+#esm-panel-header h3 {
+  margin: 0;
+  font-size: 14px;
+}
+
+#esm-panel-header button {
+  border: none;
+  background: none;
+  font-size: 16px;
+  cursor: pointer;
+}
+
+#esm-panel-body {
+  padding: 8px 10px 10px;
+  overflow-y: auto;
+}
+
+.esm-section-title {
+  font-weight: 600;
+  margin-top: 6px;
+  margin-bottom: 4px;
+}
+
+.esm-small {
+  font-size: 11px;
+  color: #666;
+  margin-bottom: 4px;
+}
+
+.esm-input-row {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.esm-input-row input,
+.esm-input-row select {
+  flex: 1;
+  padding: 3px 5px;
+  font-size: 12px;
+}
+
+.esm-btn {
+  display: inline-block;
+  width: 100%;
+  padding: 6px 0;
+  margin-top: 4px;
+  border-radius: 6px;
+  cursor: pointer;
+  border: 1px solid #222;
+  background: #111;
+  color: #fff;
+  font-size: 13px;
+}
+
+.esm-btn.secondary {
+  background: #fff;
+  color: #111;
+}
+
+.esm-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+
+.esm-table th,
+.esm-table td {
+  padding: 3px;
+  border-bottom: 1px solid #eee;
+}
+
+.esm-table th {
+  text-align: left;
+  font-weight: 600;
+}
+
+.esm-tag {
+  display: inline-block;
+  padding: 1px 4px;
+  border-radius: 4px;
+  font-size: 10px;
+  background: #f0f0f0;
+}
+
+.esm-tag.running {
+  background: #e6ffed;
+}
+
+.esm-tag.stopped {
+  background: #ffecec;
+}

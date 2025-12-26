@@ -1,6 +1,8 @@
 // src/routes/licenseRoutes.ts
 import { Router } from "express";
-import { License, firstDayOfCurrentMonth } from "../models/license";
+import { CREDITS_PER_RUN } from "../config";
+import { License } from "../models/license";
+import { User } from "../models/user";
 
 const router = Router();
 
@@ -37,74 +39,44 @@ console.log('consuming license', req.body);
         .json({ valid: false, message: "License is invalid or inactive." });
     }
 
-    // reset period if month changed
-    const now = new Date();
-    const currentPeriodStart = firstDayOfCurrentMonth();
-    if (license.periodStart < currentPeriodStart) {
-      license.periodStart = currentPeriodStart;
-      license.usedRunsThisPeriod = 0;
+    const user = await User.findOne({ licenseKey: license.key }).exec();
+    if (!user) {
+      return res
+        .status(403)
+        .json({ valid: false, message: "License is not linked to a user." });
     }
 
-    let remainingRuns: number;
-    if (license.maxRunsPerMonth < 0) {
-      // unlimited
-      remainingRuns = Number.MAX_SAFE_INTEGER;
-    } else {
-      remainingRuns =
-        license.maxRunsPerMonth - license.usedRunsThisPeriod;
-    }
+    const creditsPerRun = Number.isFinite(CREDITS_PER_RUN) && CREDITS_PER_RUN > 0
+      ? Math.floor(CREDITS_PER_RUN)
+      : 1;
+    const currentCredits = Math.max(0, Math.floor(user.credits || 0));
+    const remainingRuns = Math.floor(currentCredits / creditsPerRun);
 
     if (requestedRuns > 0) {
-        if (license.plan === 'trial' && requestedRuns > 3) {
-            return res.status(403).json({
-                valid: false,
-                plan: license.plan,
-                remainingRuns: Math.max(0, remainingRuns),
-                message: `Trial plan allows maximum run a sales for only 3 days at a time. Please upgrade your plan.`,
-            });
-
-        }
-
-      // enforce limit for non-unlimited plans
-      if (
-        license.maxRunsPerMonth >= 0 &&
-        requestedRuns > remainingRuns
-      ) {
-        await license.save(); // save possible period reset
+      const requiredCredits = requestedRuns * creditsPerRun;
+      if (requiredCredits > currentCredits) {
         return res.status(403).json({
           valid: false,
-          plan: license.plan,
+          remainingCredits: currentCredits,
           remainingRuns: Math.max(0, remainingRuns),
-          message: `Limit exceeded. You can create only ${Math.max(
-            0,
-            remainingRuns
-          )} more sale(s) this month.`,
+          message: "Not enough credits. Please refill to continue.",
         });
       }
 
-      // consume runs
-      if (license.maxRunsPerMonth >= 0) {
-        license.usedRunsThisPeriod += requestedRuns;
-      }
-      await license.save();
-      if (license.maxRunsPerMonth < 0) {
-        remainingRuns = Number.MAX_SAFE_INTEGER;
-      } else {
-        remainingRuns =
-          license.maxRunsPerMonth - license.usedRunsThisPeriod;
-      }
-    } else {
-      // just check, don't consume
-      await license.save(); // in case we reset the period
+      user.credits = currentCredits - requiredCredits;
+      await user.save();
     }
+
+    const updatedCredits =
+      requestedRuns > 0 ? Math.max(0, user.credits || 0) : currentCredits;
+    const updatedRemainingRuns = Math.floor(updatedCredits / creditsPerRun);
 
     return res.json({
       valid: true,
       plan: license.plan,
-      remainingRuns:
-        license.maxRunsPerMonth < 0
-          ? -1
-          : Math.max(0, remainingRuns),
+      remainingCredits: updatedCredits,
+      remainingRuns: Math.max(0, updatedRemainingRuns),
+      creditsPerRun,
     });
   } catch (err) {
     console.error("License check error:", err);
@@ -115,4 +87,3 @@ console.log('consuming license', req.body);
 });
 
 export default router;
-

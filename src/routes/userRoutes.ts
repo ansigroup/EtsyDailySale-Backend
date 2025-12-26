@@ -1,6 +1,15 @@
 import { Router } from "express";
-import { APP_BASE_URL } from "../config";
+import {
+  APP_BASE_URL,
+  CREDITS_PACK_LARGE,
+  CREDITS_PACK_SMALL,
+  CREDITS_PER_RUN,
+  FREE_RUNS_ON_SIGNUP,
+  REFERRAL_SIGNUP_CREDITS,
+} from "../config";
 import { License } from "../models/license";
+import { CreditPurchaseLog } from "../models/creditPurchaseLog";
+import { ReferralEarning } from "../models/referralEarning";
 import { ISupportRequest, SupportRequest } from "../models/support";
 import { IUser, User } from "../models/user";
 import { generateLicenseKey, provisionLicenseForPlan } from "../utils/licenseUtils";
@@ -45,16 +54,38 @@ async function ensureUser(email: string, ref?: string): Promise<EnsureUserResult
       if (referrer) {
         referrerEmail = referrer.email;
         referrer.referredUsersCount = (referrer.referredUsersCount || 0) + 1;
+        const signupCredits = Number.isFinite(REFERRAL_SIGNUP_CREDITS) && REFERRAL_SIGNUP_CREDITS > 0
+          ? Math.floor(REFERRAL_SIGNUP_CREDITS)
+          : 0;
+        if (signupCredits > 0) {
+          referrer.credits = (referrer.credits || 0) + signupCredits;
+          referrer.referralCreditsEarned = (referrer.referralCreditsEarned || 0) + signupCredits;
+          await ReferralEarning.create({
+            referrerEmail: referrer.email,
+            referredEmail: email,
+            credits: signupCredits,
+            source: "signup",
+          });
+        }
         await referrer.save();
       }
     }
 
     const license = await provisionLicenseForPlan("free");
+    const creditsPerRun = Number.isFinite(CREDITS_PER_RUN) && CREDITS_PER_RUN > 0
+      ? Math.floor(CREDITS_PER_RUN)
+      : 1;
+    const freeRuns = Number.isFinite(FREE_RUNS_ON_SIGNUP) && FREE_RUNS_ON_SIGNUP > 0
+      ? Math.floor(FREE_RUNS_ON_SIGNUP)
+      : 0;
+    const startingCredits = freeRuns * creditsPerRun;
+
     user = await User.create({
       email,
       plan: "free",
       subscriptionStatus: "none",
       licenseKey: license.key,
+      credits: startingCredits,
       referrer: referrerEmail,
     });
     created = true;
@@ -162,6 +193,8 @@ router.post("/auth/magic-login", async (req, res) => {
         licenseKey: user.licenseKey,
         subscriptionStatus: user.subscriptionStatus,
         nextBillingDate: user.nextBillingDate,
+        credits: user.credits,
+        creditsPerRun: CREDITS_PER_RUN,
       },
     });
   } catch (error) {
@@ -183,6 +216,8 @@ router.get("/me", async (req, res) => {
       licenseKey: user.licenseKey,
       subscriptionStatus: user.subscriptionStatus,
       nextBillingDate: user.nextBillingDate,
+      credits: user.credits,
+      creditsPerRun: CREDITS_PER_RUN,
     });
   } catch (error) {
     console.error("/me error", error);
@@ -206,38 +241,44 @@ router.post("/subscription/create", async (req, res) => {
     }
 
     const { user } = await ensureUser(email);
-
-    user.plan = "full";
-    user.subscriptionStatus = "active";
-    user.nextBillingDate = new Date(Date.now() + 1000 * 60 * 60 * 24 * 30);
-
-    let license = await License.findOne({ key: user.licenseKey }).exec();
-    if (!license) {
-      license = await provisionLicenseForPlan("full");
+    if (!user.licenseKey) {
+      const license = await provisionLicenseForPlan("free");
       user.licenseKey = license.key;
-    } else {
-      license.plan = "pro";
-      license.maxRunsPerMonth = -1;
-      license.active = true;
-      await license.save();
+      await user.save();
     }
 
-    await user.save();
+    const requestedPackage =
+      typeof req.body?.package === "string"
+        ? req.body.package
+        : typeof req.query?.package === "string"
+          ? req.query.package
+          : "small";
+    const normalizedPackage = requestedPackage.toLowerCase();
+    const isLargePackage = ["large", "bulk", "pro", "max"].includes(normalizedPackage);
+    const selectedPriceId = isLargePackage ? paddlePrice2Id : paddlePriceId;
+    const selectedCredits = isLargePackage ? CREDITS_PACK_LARGE : CREDITS_PACK_SMALL;
 
-    //return res.json({ ok: true, priceId: paddlePriceId });
-    return res.json({ ok: true, data: {
-         items: [
+    if (!selectedPriceId) {
+      return res.status(500).json({ ok: false, message: "Requested Paddle price is not configured" });
+    }
+
+    return res.json({
+      ok: true,
+      package: isLargePackage ? "large" : "small",
+      credits: selectedCredits,
+      data: {
+        items: [
           {
-            priceId: paddlePriceId,
-            quantity: 1
-          }
-          //,
-          // {
-          //   priceId: paddlePrice2Id,
-          //   quantity: 1
-          // }
-          ]
-      } });
+            priceId: selectedPriceId,
+            quantity: 1,
+          },
+        ],
+      },
+      availablePackages: [
+        { key: "small", credits: CREDITS_PACK_SMALL, priceId: paddlePriceId },
+        { key: "large", credits: CREDITS_PACK_LARGE, priceId: paddlePrice2Id },
+      ],
+    });
   } catch (error) {
     console.error("/subscription/create error", error);
     return res.status(500).json({ ok: false, message: "Server error" });
@@ -250,21 +291,8 @@ router.post("/subscription/cancel", async (req, res) => {
     if (!email) {
       return res.status(401).json({ message: "Missing user identity" });
     }
-    const { user } = await ensureUser(email);
-    user.plan = "free";
-    user.subscriptionStatus = "canceled";
-    user.nextBillingDate = undefined;
-
-    const license = await License.findOne({ key: user.licenseKey }).exec();
-    if (license) {
-      license.plan = "trial";
-      license.maxRunsPerMonth = 3;
-      license.active = true;
-      await license.save();
-    }
-
-    await user.save();
-    return res.json({ ok: true });
+    await ensureUser(email);
+    return res.json({ ok: true, message: "No subscription is active. Credits are pay-as-you-go." });
   } catch (error) {
     console.error("/subscription/cancel error", error);
     return res.status(500).json({ ok: false, message: "Server error" });
@@ -328,10 +356,60 @@ router.get("/referral", async (req, res) => {
       link: referralLinkForUser(user),
       referredUsersCount: user.referredUsersCount,
       activePaidReferrals: user.activePaidReferrals,
-      monthlyReferralEarnings: user.monthlyReferralEarnings,
+      totalEarnedCredits: user.referralCreditsEarned,
     });
   } catch (error) {
     console.error("/referral error", error);
+    return res.status(500).json({ message: "Server error" });
+  }
+});
+
+router.get("/referral/logs", async (req, res) => {
+  try {
+    const email = getEmailFromRequest(req);
+    if (!email) {
+      return res.status(401).json({ message: "Missing user identity" });
+    }
+    await ensureUser(email);
+
+    const limitParam = typeof req.query.limit === "string" ? Number(req.query.limit) : undefined;
+    const limit = Number.isFinite(limitParam) && limitParam && limitParam > 0
+      ? Math.min(Math.floor(limitParam), 100)
+      : 50;
+
+    const logs = await ReferralEarning.find({ referrerEmail: email })
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .exec();
+
+    return res.json(logs);
+  } catch (error) {
+    console.error("/referral/logs error", error);
+    return res.status(500).json({ message: "Server error" });
+  }
+});
+
+router.get("/credits/logs", async (req, res) => {
+  try {
+    const email = getEmailFromRequest(req);
+    if (!email) {
+      return res.status(401).json({ message: "Missing user identity" });
+    }
+    await ensureUser(email);
+
+    const limitParam = typeof req.query.limit === "string" ? Number(req.query.limit) : undefined;
+    const limit = Number.isFinite(limitParam) && limitParam && limitParam > 0
+      ? Math.min(Math.floor(limitParam), 100)
+      : 50;
+
+    const logs = await CreditPurchaseLog.find({ email })
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .exec();
+
+    return res.json(logs);
+  } catch (error) {
+    console.error("/credits/logs error", error);
     return res.status(500).json({ message: "Server error" });
   }
 });

@@ -1,0 +1,33 @@
+{
+  "manifest_version": 3,
+  "name": "DailySale - Etsy Run a Sale Autopilot",
+  "version": "1.0.2",
+  "description": "Control panel to help schedule and manage Etsy shop sales from the Sales & Discounts page.",
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+
+  "action": {
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png"
+    }
+  },
+  "permissions": ["storage", "scripting", "activeTab"],
+  "host_permissions": [
+    "https://www.etsy.com/*",
+    "http://api.dailysale.app/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["https://www.etsy.com/*"],
+      "js": ["content-src.js"],
+      "css": ["panel.css"],
+      "run_at": "document_idle"
+    }
+  ]
+}
