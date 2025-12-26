@@ -203,6 +203,7 @@ router.post("/auth/magic-login", async (req, res) => {
         nextBillingDate: user.nextBillingDate,
         credits: user.credits,
         creditsPerRun: CREDITS_PER_RUN,
+        isAdmin: user.isAdmin,
       },
     });
   } catch (error) {
@@ -226,6 +227,7 @@ router.get("/me", async (req, res) => {
       nextBillingDate: user.nextBillingDate,
       credits: user.credits,
       creditsPerRun: CREDITS_PER_RUN,
+      isAdmin: user.isAdmin,
     });
   } catch (error) {
     console.error("/me error", error);
