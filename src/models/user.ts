@@ -17,6 +17,7 @@ export interface IUser extends Document {
   monthlyReferralEarnings: number;
   referralCreditsEarned: number;
   paidReferralUsers: string[];
+  referralSignupAwarded: boolean;
   magicLoginCode?: string;
   magicLoginExpiresAt?: Date;
 
@@ -43,6 +44,7 @@ const UserSchema = new Schema<IUser>(
     monthlyReferralEarnings: { type: Number, default: 0 },
     referralCreditsEarned: { type: Number, default: 0 },
     paidReferralUsers: { type: [String], default: [] },
+    referralSignupAwarded: { type: Boolean, default: false },
     magicLoginCode: { type: String },
     magicLoginExpiresAt: { type: Date },
   },

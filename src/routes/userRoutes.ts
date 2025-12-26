@@ -53,21 +53,6 @@ async function ensureUser(email: string, ref?: string): Promise<EnsureUserResult
       const referrer = await User.findOne({ referralCode: ref }).exec();
       if (referrer) {
         referrerEmail = referrer.email;
-        referrer.referredUsersCount = (referrer.referredUsersCount || 0) + 1;
-        const signupCredits = Number.isFinite(REFERRAL_SIGNUP_CREDITS) && REFERRAL_SIGNUP_CREDITS > 0
-          ? Math.floor(REFERRAL_SIGNUP_CREDITS)
-          : 0;
-        if (signupCredits > 0) {
-          referrer.credits = (referrer.credits || 0) + signupCredits;
-          referrer.referralCreditsEarned = (referrer.referralCreditsEarned || 0) + signupCredits;
-          await ReferralEarning.create({
-            referrerEmail: referrer.email,
-            referredEmail: email,
-            credits: signupCredits,
-            source: "signup",
-          });
-        }
-        await referrer.save();
       }
     }
 
@@ -172,7 +157,7 @@ router.post("/auth/magic-login", async (req, res) => {
     const normalizedEmail = email.toLowerCase();
     const user = await User.findOne({ email: normalizedEmail }).exec();
 
-    if (!user || !user.magicLoginCode || !user.magicLoginExpiresAt) {
+  if (!user || !user.magicLoginCode || !user.magicLoginExpiresAt) {
       return res.status(400).json({ ok: false, message: "Invalid login link" });
     }
 
@@ -183,6 +168,29 @@ router.post("/auth/magic-login", async (req, res) => {
 
     user.magicLoginCode = undefined;
     user.magicLoginExpiresAt = undefined;
+
+    if (user.referrer && !user.referralSignupAwarded) {
+      const referrer = await User.findOne({ email: user.referrer }).exec();
+      if (referrer) {
+        referrer.referredUsersCount = (referrer.referredUsersCount || 0) + 1;
+        const signupCredits = Number.isFinite(REFERRAL_SIGNUP_CREDITS) && REFERRAL_SIGNUP_CREDITS > 0
+          ? Math.floor(REFERRAL_SIGNUP_CREDITS)
+          : 0;
+        if (signupCredits > 0) {
+          referrer.credits = (referrer.credits || 0) + signupCredits;
+          referrer.referralCreditsEarned = (referrer.referralCreditsEarned || 0) + signupCredits;
+          await ReferralEarning.create({
+            referrerEmail: referrer.email,
+            referredEmail: user.email,
+            credits: signupCredits,
+            source: "signup",
+          });
+        }
+        await referrer.save();
+        user.referralSignupAwarded = true;
+      }
+    }
+
     await user.save();
 
     return res.json({
