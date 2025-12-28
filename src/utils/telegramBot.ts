@@ -106,9 +106,7 @@ export async function sendTelegramNotification(message: string) {
   }
 
   try {
-    await telegramBot.sendMessage(TELEGRAM_CHAT_ID, message, {
-      parse_mode: "Markdown",
-    });
+    await telegramBot.sendMessage(TELEGRAM_CHAT_ID, message);
   } catch (error) {
     console.error("Error sending Telegram notification", error);
   }

@@ -6,6 +6,7 @@ import {
   CREDITS_PER_RUN,
   FREE_RUNS_ON_SIGNUP,
   REFERRAL_SIGNUP_CREDITS,
+  TELEGRAM_VISITOR_NOTIFICATIONS,
 } from "../config";
 import { License } from "../models/license";
 import { CreditPurchaseLog } from "../models/creditPurchaseLog";
@@ -42,6 +43,7 @@ interface EnsureUserResult {
   user: IUser;
   created: boolean;
   referrerEmail?: string;
+  referralCodeUsed?: string;
 }
 
 async function ensureUser(email: string, ref?: string): Promise<EnsureUserResult> {
@@ -49,10 +51,12 @@ async function ensureUser(email: string, ref?: string): Promise<EnsureUserResult
   let created = false;
   if (!user) {
     let referrerEmail: string | undefined;
+    let referralCodeUsed: string | undefined;
     if (ref) {
       const referrer = await User.findOne({ referralCode: ref }).exec();
       if (referrer) {
         referrerEmail = referrer.email;
+        referralCodeUsed = ref;
       }
     }
 
@@ -74,7 +78,7 @@ async function ensureUser(email: string, ref?: string): Promise<EnsureUserResult
       referrer: referrerEmail,
     });
     created = true;
-    return { user, created, referrerEmail };
+    return { user, created, referrerEmail, referralCodeUsed };
   } else if (!user.licenseKey) {
     const license = await provisionLicenseForPlan(user.plan);
     user.licenseKey = license.key;
@@ -83,15 +87,17 @@ async function ensureUser(email: string, ref?: string): Promise<EnsureUserResult
   return { user, created, referrerEmail: user.referrer };
 }
 
-async function notifyNewUser(user: IUser, referrerEmail?: string) {
+async function notifyNewUser(
+  user: IUser,
+  referrerEmail?: string,
+  referralCodeUsed?: string
+) {
   const referralLink = referralLinkForUser(user) || "N/A";
-  const referrerText = referrerEmail ? `Referrer: ${referrerEmail}` : "Referrer: none";
-  const message = [
-    "🆕 New user registration",
-    `Email: ${user.email}`,
-    referrerText,
-    `Referral link: ${referralLink}`,
-  ].join("\n");
+  const baseLines = ["🆕 New user registration", `Email: ${user.email}`];
+  const referralLines = referrerEmail
+    ? [`Referred by: ${referrerEmail}`, `Referral code: ${referralCodeUsed || "unknown"}`]
+    : ["Referrer: none"];
+  const message = [...baseLines, ...referralLines, `Referral link: ${referralLink}`].join("\n");
 
   await sendTelegramNotification(message);
 }
@@ -126,7 +132,10 @@ router.post("/auth/request-magic-link", async (req, res) => {
 
     const normalizedEmail = email.toLowerCase();
     const referralCode = typeof ref === "string" && ref.trim().length > 0 ? ref : undefined;
-    const { user, created, referrerEmail } = await ensureUser(normalizedEmail, referralCode);
+    const { user, created, referrerEmail, referralCodeUsed } = await ensureUser(
+      normalizedEmail,
+      referralCode
+    );
 
     const loginCode = generateMagicLoginCode();
     user.magicLoginCode = loginCode;
@@ -134,7 +143,7 @@ router.post("/auth/request-magic-link", async (req, res) => {
     await user.save();
 
     if (created) {
-      await notifyNewUser(user, referrerEmail);
+      await notifyNewUser(user, referrerEmail, referralCodeUsed);
     }
 
     const { sent, loginUrl } = await sendMagicLinkEmail(normalizedEmail, loginCode);
@@ -459,6 +468,40 @@ router.post("/support", async (req, res) => {
   } catch (error) {
     console.error("/support error", error);
     return res.status(500).json({ message: "Server error" });
+  }
+});
+
+router.post("/visit", async (req, res) => {
+  try {
+    if (!TELEGRAM_VISITOR_NOTIFICATIONS) {
+      return res.json({ ok: true, notifications: "disabled" });
+    }
+
+    const ipHeader = req.headers["x-forwarded-for"];
+    const ip = Array.isArray(ipHeader)
+      ? ipHeader[0]
+      : typeof ipHeader === "string"
+        ? ipHeader.split(",")[0]?.trim()
+        : req.ip;
+    const userAgent = req.headers["user-agent"] || "unknown";
+    const { page, referrer, utm } = req.body || {};
+
+    const message = [
+      "👀 New site visit",
+      `IP: ${ip || "unknown"}`,
+      `User agent: ${userAgent}`,
+      page ? `Page: ${page}` : undefined,
+      referrer ? `Referrer: ${referrer}` : undefined,
+      utm ? `UTM: ${JSON.stringify(utm)}` : undefined,
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    await sendTelegramNotification(message);
+    return res.json({ ok: true });
+  } catch (error) {
+    console.error("/visit error", error);
+    return res.status(500).json({ ok: false, message: "Server error" });
   }
 });
 

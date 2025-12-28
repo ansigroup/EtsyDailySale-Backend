@@ -17,6 +17,8 @@ export const EMAIL_FROM = process.env.EMAIL_FROM || "no-reply@dailysale.app";
 
 export const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
 export const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || "";
+export const TELEGRAM_VISITOR_NOTIFICATIONS =
+  process.env.TELEGRAM_VISITOR_NOTIFICATIONS !== "false";
 
 export type PaddleEnvironment = "sandbox" | "production";
 

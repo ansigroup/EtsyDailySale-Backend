@@ -13,6 +13,7 @@ import { License } from "../models/license";
 import { ReferralEarning } from "../models/referralEarning";
 import { User } from "../models/user";
 import { provisionLicenseForPlan } from "../utils/licenseUtils";
+import { sendTelegramNotification } from "../utils/telegramBot";
 
 function extractEmail(payload: any): string | undefined {
   if (!payload) return undefined;
@@ -53,6 +54,93 @@ function extractStatus(payload: any): string | undefined {
   const candidates = [payload?.status, payload?.subscription_status, payload?.data?.status];
   const status = candidates.find((value) => typeof value === "string" && value.trim().length > 0);
   return status?.toLowerCase();
+}
+
+function normalizeStringCandidate(value: unknown): string | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value.toString();
+  }
+  if (typeof value === "string" && value.trim().length > 0) {
+    return value.trim();
+  }
+  if (value && typeof value === "object") {
+    const candidate = (value as { value?: unknown; amount?: unknown }).value ??
+      (value as { amount?: unknown }).amount;
+    if (typeof candidate === "number" && Number.isFinite(candidate)) {
+      return candidate.toString();
+    }
+    if (typeof candidate === "string" && candidate.trim().length > 0) {
+      return candidate.trim();
+    }
+  }
+  return undefined;
+}
+
+function extractTransactionId(payload: any): string | undefined {
+  const candidates = [
+    payload?.transaction_id,
+    payload?.transactionId,
+    payload?.data?.transaction_id,
+    payload?.data?.transactionId,
+    payload?.data?.transaction?.id,
+    payload?.data?.payment_id,
+    payload?.data?.payments?.[0]?.payment_id,
+    payload?.data?.payments?.[0]?.id,
+    payload?.data?.id,
+    payload?.id,
+  ];
+  for (const candidate of candidates) {
+    const normalized = normalizeStringCandidate(candidate);
+    if (normalized) return normalized;
+  }
+  return undefined;
+}
+
+function extractAmountAndCurrency(payload: any): { amount?: string; currency?: string } {
+  const amountCandidates = [
+    payload?.amount,
+    payload?.total,
+    payload?.data?.amount,
+    payload?.data?.total,
+    payload?.data?.totals?.total,
+    payload?.data?.details?.totals?.total,
+    payload?.data?.payments?.[0]?.amount,
+    payload?.data?.payments?.[0]?.amount?.value,
+  ];
+  let amount: string | undefined;
+  for (const candidate of amountCandidates) {
+    amount = normalizeStringCandidate(candidate);
+    if (amount) break;
+  }
+
+  const currencyCandidates = [
+    payload?.currency,
+    payload?.currency_code,
+    payload?.data?.currency_code,
+    payload?.data?.totals?.currency_code,
+    payload?.data?.details?.totals?.currency_code,
+    payload?.data?.payments?.[0]?.currency_code,
+    payload?.data?.payments?.[0]?.currency,
+  ];
+  let currency: string | undefined;
+  for (const candidate of currencyCandidates) {
+    currency = normalizeStringCandidate(candidate);
+    if (currency) break;
+  }
+
+  return { amount, currency };
+}
+
+function formatAmountDisplay(amount: string, currency?: string): string {
+  const trimmed = amount.trim();
+  const isIntegerString = /^\d+$/.test(trimmed);
+  if (isIntegerString && currency) {
+    const numeric = Number(trimmed);
+    if (Number.isFinite(numeric)) {
+      return (numeric / 100).toFixed(2);
+    }
+  }
+  return trimmed;
 }
 
 function isPaymentSuccess(eventType: string | undefined, payload: any) {
@@ -158,6 +246,28 @@ async function applyCreditPurchase(email: string, payload: any) {
     priceId: priceIds[0],
     eventId: payload?.event_id,
   });
+
+  const transactionId = extractTransactionId(payload);
+  const { amount, currency } = extractAmountAndCurrency(payload);
+  const normalizedAmount = amount ? formatAmountDisplay(amount, currency) : undefined;
+  const amountLine = amount
+    ? currency?.toUpperCase() === "USD"
+      ? `Amount: $${normalizedAmount}`
+      : `Amount: ${normalizedAmount}${currency ? ` ${currency}` : ""}`
+    : undefined;
+
+  await sendTelegramNotification(
+    [
+      "💳 Credits purchased",
+      `Email: ${user.email}`,
+      `Credits: ${creditsToAdd}`,
+      amountLine,
+      transactionId ? `Transaction ID: ${transactionId}` : undefined,
+      priceIds.length > 0 ? `Price IDs: ${priceIds.join(", ")}` : undefined,
+    ]
+      .filter(Boolean)
+      .join("\n")
+  );
 
   if (user.referrer) {
     const referrer = await User.findOne({ email: user.referrer }).exec();
